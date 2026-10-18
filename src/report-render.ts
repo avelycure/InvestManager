@@ -1,6 +1,9 @@
 import { moscowDateKey, moscowHourMinute } from './time.ts';
 import { formatRub } from './moex-company-market-data.ts';
-import type { DataPoint, DigestResult, SelectedNews, SourceIssue } from './types';
+import type { DataPoint, DigestResult, RelatedNotes, SelectedNews, SourceIssue } from './types';
+import { eventNoteKey } from './related-notes.ts';
+import { companyBrandColor, companyCalloutType } from './company-brand.ts';
+import type { Company } from './types';
 
 const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'] as const;
 
@@ -87,18 +90,43 @@ function marketTable(points: DataPoint[], reportYear: string): string {
   }));
 }
 
-function detailedNews(items: SelectedNews[], reportYear: string): string {
+function detailedNews(items: SelectedNews[], reportYear: string, relatedNotes?: RelatedNotes, sectionNotes: string[] = []): string {
   if (!items.length) return '_Новых событий нет._';
   return items.map((item) => {
     const label = item.company ? `**${safeText(item.company)}** · ` : '';
     const title = item.titleRu ?? item.title;
     const [year = '', month = '', day = ''] = moscowDateKey(item.publishedAt).split('-');
     const published = item.publishedTimeKnown === false ? readableDate(year, month, day, reportYear) : dateTime(item.publishedAt, reportYear);
-    return `- ${label}**${safeText(shorten(title, 180))}** · ${published} · ${sources(item)}`;
+    const notes = relatedNotes?.events?.[eventNoteKey(item)]?.filter((link) => !sectionNotes.includes(link))
+      .slice(0, 2).join(' · ');
+    return `- ${label}**${safeText(shorten(title, 180))}** · ${published} · ${sources(item)}${notes ? `\n  - 📎 Мои заметки: ${notes}` : ''}`;
   }).join('\n');
 }
 
-function groupedWorldNews(items: SelectedNews[], reportYear: string): string {
+function noteLinks(links: string[] | undefined): string {
+  return links?.length ? `**Мои заметки:** ${links.join(' · ')}\n\n` : '';
+}
+
+function newsCount(count: number): string {
+  const word = count % 100 >= 11 && count % 100 <= 14 ? 'новостей'
+    : count % 10 === 1 ? 'новость' : count % 10 >= 2 && count % 10 <= 4 ? 'новости' : 'новостей';
+  return `${count} ${word}`;
+}
+
+function reportCard(kind: string, title: string, content: string): string {
+  const body = content.split('\n').map((line) => line ? `> ${line}` : '>').join('\n');
+  return `> [!${kind}] ${title}\n>\n${body}`;
+}
+
+function topicCard(topic: string, news: SelectedNews[], reportYear: string,
+  relatedNotes?: RelatedNotes, older = false): string {
+  const sectionNotes = relatedNotes?.topics[topic];
+  const content = [noteLinks(sectionNotes).trim(),
+    detailedNews(news, reportYear, relatedNotes, sectionNotes)].filter(Boolean).join('\n\n');
+  return reportCard('invest-topic', `${older ? '🕘' : '🗞️'} ${safeText(topic)} · ${newsCount(news.length)}`, content);
+}
+
+function groupedWorldNews(items: SelectedNews[], reportYear: string, relatedNotes?: RelatedNotes): string {
   if (!items.length) return '> [!info] По доступным источникам событий по выбранным темам не отобрано.';
   const groups = new Map<string, SelectedNews[]>();
   for (const item of items) {
@@ -107,11 +135,12 @@ function groupedWorldNews(items: SelectedNews[], reportYear: string): string {
     group.push(item);
     groups.set(topic, group);
   }
-  return [...groups].map(([topic, news]) => `#### ${safeText(topic)}\n\n${detailedNews(news, reportYear)}`).join('\n\n');
+  return [...groups].map(([topic, news]) => topicCard(topic, news, reportYear, relatedNotes)).join('\n\n');
 }
 
 function companyNews(groups: NonNullable<DigestResult['companyNews']>, windowStart: Date, windowEnd: Date, reportYear: string,
-  capitalizations: DigestResult['companyCapitalizations']): string {
+  capitalizations: DigestResult['companyCapitalizations'], relatedNotes?: RelatedNotes,
+  configuredCompanies: Company[] = []): string {
   if (!groups.length) return '> [!info] Компании не указаны в файле портфеля.';
   return [
     '_До пяти публикаций пресс-центра и трёх новостей из других источников на компанию. 🕘 — опубликовано раньше указанного периода._',
@@ -119,27 +148,36 @@ function companyNews(groups: NonNullable<DigestResult['companyNews']>, windowSta
     groups.map((group) => {
       const items = [...group.press, ...group.news].sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
       const ticker = group.ticker && /^[A-Z0-9._-]{1,24}$/.test(group.ticker) ? group.ticker : '';
-      const heading = `#### ${safeText(group.company)}${ticker ? ` · ${ticker}` : ''}`;
-      const chart = ticker ? `\n\n\`\`\`invest-manager-stock\n${ticker}\n${windowEnd.toISOString()}\n\`\`\`` : '';
+      const configured = configuredCompanies.find((company) => company.ticker === ticker);
+      const cardType = companyCalloutType(companyBrandColor(configured ?? { ticker }));
+      const title = `🏢 ${safeText(group.company)}${ticker ? ` · ${ticker}` : ''} · ${items.length ? newsCount(items.length) : 'без публикаций'}`;
+      const chart = ticker ? `\`\`\`invest-manager-stock\n${ticker}\n${windowEnd.toISOString()}\n\`\`\`` : '';
       const cap = ticker ? capitalizations?.[ticker] : undefined;
-      const capitalization = `\n\n**Капитализация выпуска:** ${cap ? `${formatRub(cap.valueRub)} · ${sourceLink('Мосбиржа, ISS', cap.url)}` : 'нет данных'}`;
-      if (!items.length) return `${heading}${chart}${capitalization}\n\n_Датированных публикаций в доступных источниках не найдено._`;
+      const capitalization = `**Капитализация выпуска:** ${cap ? `${formatRub(cap.valueRub)} · ${sourceLink('Мосбиржа, ISS', cap.url)}` : 'нет данных'}`;
+      const related = noteLinks(relatedNotes?.companies[ticker]).trim();
+      if (!items.length) return reportCard(cardType, title,
+        [chart, capitalization, related, '_Датированных публикаций в доступных источниках не найдено._']
+          .filter(Boolean).join('\n\n'));
       const rows = items.map((item) => {
         const [year = '', month = '', day = ''] = moscowDateKey(item.publishedAt).split('-');
         const published = item.publishedTimeKnown === false ? readableDate(year, month, day, reportYear) : dateTime(item.publishedAt, reportYear);
         const date = `${item.publishedAt < windowStart ? '🕘 ' : ''}${published}`;
-        return [safeText(date), `**${safeText(shorten(item.titleRu ?? item.title, 180))}**`, sources(item)];
+        const notes = relatedNotes?.events?.[eventNoteKey(item)]?.filter((link) =>
+          !relatedNotes?.companies[ticker]?.includes(link)).slice(0, 2).join(' · ');
+        return [safeText(date), `**${safeText(shorten(item.titleRu ?? item.title, 180))}**${notes ? `<br>📎 Мои заметки: ${notes}` : ''}`, sources(item)];
       });
-      return `${heading}${chart}${capitalization}\n\n${table(['Дата', 'Публикация', 'Источник'], rows)}`;
+      return reportCard(cardType, title,
+        [chart, capitalization, related, table(['Дата', 'Публикация', 'Источник'], rows)]
+          .filter(Boolean).join('\n\n'));
     }).join('\n\n'),
   ].join('\n');
 }
 
-function olderWorldNews(groups: NonNullable<DigestResult['worldBackfill']>, reportYear: string): string {
+function olderWorldNews(groups: NonNullable<DigestResult['worldBackfill']>, reportYear: string, relatedNotes?: RelatedNotes): string {
   if (!groups.length) return '';
   return `### 🕘 Последние доступные новости по темам · старше 24 часов\n\n`
     + `_В темах без новых событий показаны более ранние датированные публикации. Это не новости за указанный выше период._\n\n`
-    + groups.map((group) => `#### ${safeText(group.topic)}\n\n${detailedNews(group.items, reportYear)}`).join('\n\n');
+    + groups.map((group) => topicCard(group.topic, group.items, reportYear, relatedNotes, true)).join('\n\n');
 }
 
 function coverage(issues: SourceIssue[]): string {
@@ -152,7 +190,7 @@ export function imoexChartBlock(series: NonNullable<DigestResult['imoex']>, end:
     JSON.stringify({ end: end.toISOString(), points: series.points, sourceUrl: series.sourceUrl }), '```'].join('\n');
 }
 
-export function renderDigest(result: DigestResult): string {
+export function renderDigest(result: DigestResult, configuredCompanies: Company[] = []): string {
   const reportYear = moscowDateKey(result.generatedAt).slice(0, 4);
   const companyGroups = result.companyNews ?? [...new Set(result.companies.map((item) => item.company ?? 'Компания'))]
     .map((company) => ({ company,
@@ -180,13 +218,14 @@ export function renderDigest(result: DigestResult): string {
     '',
     '_Капитализация относится к выпуску акций с указанным тикером; у компании могут быть другие выпуски._',
     '',
-    companyNews(companyGroups, result.windowStart, result.windowEnd, reportYear, result.companyCapitalizations),
+    companyNews(companyGroups, result.windowStart, result.windowEnd, reportYear, result.companyCapitalizations, result.relatedNotes,
+      configuredCompanies),
     '',
     '### 🌍 Новости в мире на сегодня',
     '',
-    groupedWorldNews(result.world, reportYear),
+    groupedWorldNews(result.world, reportYear, result.relatedNotes),
     '',
-    ...(result.worldBackfill?.length ? [olderWorldNews(result.worldBackfill, reportYear), ''] : []),
+    ...(result.worldBackfill?.length ? [olderWorldNews(result.worldBackfill, reportYear, result.relatedNotes), ''] : []),
     coverage(result.issues),
   ].join('\n');
 }

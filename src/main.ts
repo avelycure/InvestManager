@@ -8,10 +8,17 @@ import { NewsFeedbackStore } from './news-feedback';
 import { REPORT_ROOT, reportPath } from './report-path';
 import { restoreDigestSnapshot, saveDigestSnapshot } from './snapshot';
 import { DigestSnapshotStore } from './snapshot-store';
+import { HELP_DOCUMENTS } from './help-documents';
+import { buildHelpRequest, helpSystemPrompt, type HelpExchange } from './help';
+import { completeModel, configuredModel } from './llm';
 import { renderStockChart } from './stock-chart-view';
+import { applyCompanyCardColors } from './company-brand';
 import { renderImoexChart } from './imoex-chart-view';
 import { InvestSettingTab } from './settings';
 import { TelegramMtproto } from './telegram-mtproto';
+import { readRenderedCompanyPage } from './playwright-company';
+import { projectRagContext } from './rag-context';
+import { findRelatedNotes } from './related-notes';
 import { dueDigest, morningWindow, moscowDateKey, recentWindow } from './time';
 import { DEFAULT_SETTINGS, type DigestResult, type InvestSettings, type NewsRating, type SelectedNews } from './types';
 import { AgentView, INVEST_VIEW_TYPE } from './view';
@@ -76,9 +83,11 @@ export default class InvestManagerPlugin extends Plugin {
     if (hadCciSettings || hadLegacyMetricsPath || (saved.lastDigest && snapshotMigrated)) await this.saveSettings();
     this.addSettingTab(new InvestSettingTab(this.app, this));
     this.registerMarkdownCodeBlockProcessor('invest-manager-stock', (source, el) => { renderStockChart(el, source); });
+    this.registerMarkdownPostProcessor((el) => { applyCompanyCardColors(el); });
     this.registerMarkdownCodeBlockProcessor('invest-manager-imoex', (source, el) => { renderImoexChart(el, source); });
     this.registerView(INVEST_VIEW_TYPE, (leaf) => new AgentView(leaf, {
       runDigest: () => this.runDigest(false),
+      askHelp: (question, history) => this.askHelp(question, history),
       openReport: (path) => this.openReport(path),
       loadLatestReport: async () => {
         const paths = [reportPath(new Date()), this.latest?.reportPath].filter((path): path is string => Boolean(path));
@@ -155,6 +164,13 @@ export default class InvestManagerPlugin extends Plugin {
     if (this.latest) this.view()?.showDigest(this.latest);
   }
 
+  private async askHelp(question: string, history: HelpExchange[]): Promise<string> {
+    if (!configuredModel(this.settings)) {
+      return 'Для ответа на вопросы настройте локальную или облачную модель в настройках Invest Manager. Список возможностей доступен в окне «Помощь».';
+    }
+    return completeModel(this.settings, helpSystemPrompt(), buildHelpRequest(question, history, HELP_DOCUMENTS));
+  }
+
   async openReport(path: string): Promise<void> {
     await this.app.workspace.openLinkText(path, '', 'tab');
   }
@@ -162,7 +178,8 @@ export default class InvestManagerPlugin extends Plugin {
   async runDigest(automatic: boolean, now = new Date()): Promise<void> {
     if (this.busy) { this.status('Другая задача уже выполняется.', !automatic); return; }
     this.busy = true;
-    this.status('Собираю новости и рыночные данные…');
+    this.status('');
+    this.view()?.setProgress('Собираю новости и рыночные данные…');
     try {
       const config = await loadConfig(this.app, this.settings);
       const feedback = await this.feedback.load();
@@ -170,9 +187,19 @@ export default class InvestManagerPlugin extends Plugin {
       const regularMorning = automatic && this.morningObservedDate === dateKey;
       const window = regularMorning ? morningWindow(dateKey, this.settings.digestReadyTime) : recentWindow(now);
       const prefetch = regularMorning && this.prefetch ? { end: this.prefetch.end, news: this.prefetch.news, semanticTopics: this.prefetch.semanticTopics } : undefined;
+      const ragContext = await projectRagContext(this.app, config, this.settings);
       const result = await buildDigest(config, this.settings, window.start, window.end, prefetch,
-        (channel, start, end) => this.telegram.readChannel(channel, start, end), this.rssCache, feedback);
-      const markdown = renderDigest(result);
+        (channel, start, end) => this.telegram.readChannel(channel, start, end), this.rssCache, feedback,
+        readRenderedCompanyPage, ragContext);
+      try {
+        const reportNews = [...result.world, ...(result.worldBackfill ?? []).flatMap((group) => group.items),
+          ...(result.companyNews ?? []).flatMap((group) => [...group.press, ...group.news])];
+        result.relatedNotes = await findRelatedNotes(this.app, config, reportPath(now), this.settings.ragEnabled, reportNews);
+      } catch (error) {
+        result.issues.push({ source: 'Мои заметки',
+          message: `Не удалось подобрать ссылки: ${error instanceof Error ? error.message : String(error)}` });
+      }
+      const markdown = renderDigest(result, config.companies);
       const path = await this.reports.append(now, markdown);
       result.reportPath = path;
       this.latest = result;
@@ -187,7 +214,10 @@ export default class InvestManagerPlugin extends Plugin {
       this.notifyReady(path, result.issues.length);
     } catch (error) {
       this.status(`Не удалось сформировать сводку: ${error instanceof Error ? error.message : String(error)}`, true);
-    } finally { this.busy = false; }
+    } finally {
+      this.busy = false;
+      this.view()?.setProgress('');
+    }
   }
 
   private async scheduleTick(): Promise<void> {
@@ -211,13 +241,14 @@ export default class InvestManagerPlugin extends Plugin {
       this.morningObservedDate = due.dateKey;
       if (this.prefetch?.dateKey === due.dateKey && this.prefetch.readyTime === this.settings.digestReadyTime) return;
       this.busy = true;
-      this.status('Подготавливаю утреннюю сводку…');
+      this.status('');
+      this.view()?.setProgress('Подготавливаю утреннюю сводку…');
       try {
         const config = await loadConfig(this.app, this.settings);
         const feedback = await this.feedback.load();
         const window = morningWindow(due.dateKey, this.settings.digestReadyTime);
         const news = await collectNews(config.companies, config.publications, config.channels, this.settings, window.start, now,
-          (channel, start, end) => this.telegram.readChannel(channel, start, end));
+          (channel, start, end) => this.telegram.readChannel(channel, start, end), readRenderedCompanyPage);
         await this.rssCache.update(config.publications, news);
         let semanticTopics: Map<string, string> | undefined;
         try {
@@ -229,7 +260,10 @@ export default class InvestManagerPlugin extends Plugin {
         this.status(`Предварительные данные собраны. В ${this.settings.digestReadyTime} МСК проверю новые публикации.`);
       } catch (error) {
         this.status(`Подготовка не удалась: ${error instanceof Error ? error.message : String(error)}`);
-      } finally { this.busy = false; }
+      } finally {
+        this.busy = false;
+        this.view()?.setProgress('');
+      }
       return;
     }
     await this.runDigest(true, now);

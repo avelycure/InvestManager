@@ -6,6 +6,7 @@ import { checkModel } from './llm';
 import { fetchMarket } from './market';
 import { REPORT_ROOT } from './report-path';
 import { collectNews } from './news';
+import { readRenderedCompanyPage } from './playwright-company';
 import { preparationTime, recentWindow } from './time';
 import type { TelegramMtproto } from './telegram-mtproto';
 import type { InvestSettings } from './types';
@@ -104,6 +105,28 @@ export class InvestSettingTab extends PluginSettingTab {
     this.path('Компании портфеля', '', 'companiesPath', files);
     this.path('Темы новостей', '', 'topicsPath', files);
     this.path('RSS-ленты изданий', 'Названия и прямые адреса RSS/Atom', 'publicationsPath', files);
+    new Setting(files).setName('Пресс-центры компаний через браузер')
+      .setDesc('Если обычный запрос не нашёл свежих датированных новостей, Playwright MCP откроет страницу в изолированном браузере. Нужны Node.js и npx.')
+      .addDropdown((dropdown) => dropdown
+        .addOption('fallback', 'Использовать при необходимости')
+        .addOption('off', 'Выключено')
+        .setValue(this.host.settings.companyBrowserMode)
+        .onChange(async (value) => {
+          this.host.settings.companyBrowserMode = value as InvestSettings['companyBrowserMode'];
+          await this.host.saveSettings();
+        }));
+    new Setting(files).setName('Проверить Playwright MCP')
+      .setDesc('Открывает тестовую публичную страницу и проверяет, что браузер возвращает HTML. Заметки не изменяются.')
+      .addButton((button) => button.setButtonText('Проверить').onClick(async () => {
+        button.setDisabled(true);
+        try {
+          const html = await readRenderedCompanyPage('https://example.com');
+          if (!html.includes('Example Domain')) throw new Error('Браузер вернул неожиданную страницу');
+          new Notice('Playwright MCP готов к чтению пресс-центров');
+        } catch (error) {
+          new Notice(`Playwright MCP: ${error instanceof Error ? error.message : String(error)}`, 10000);
+        } finally { button.setDisabled(false); }
+      }));
     new Setting(files).setClass('invest-manager-settings-path').setName('Папка статистики').setDesc('Отчёты создаются только здесь.').addText((text) => text.setValue(REPORT_ROOT).setDisabled(true));
 
     new Setting(files).setName('Проверить файлы').setDesc('Проверяет формат и обязательные поля четырёх входных файлов.').addButton((button) => button.setButtonText('Проверить').onClick(async () => {
@@ -157,6 +180,23 @@ export class InvestSettingTab extends PluginSettingTab {
         this.host.settings.cloudLlmApiKey = value ? this.app.secretStorage.getSecret(value) ?? '' : '';
         await this.host.saveSettings();
       }));
+    const rag = this.section('Контекст проекта (RAG)');
+    new Setting(rag).setName('Использовать RAG')
+      .setDesc('При составлении отчёта искать подходящие заметки через установленный плагин AI Advent RAG и учитывать их при выборе новостей. Индекс создаётся и хранится в AI Advent RAG.')
+      .addToggle((toggle) => toggle
+        .setValue(this.host.settings.ragEnabled)
+        .onChange(async (value) => {
+          this.host.settings.ragEnabled = value;
+          await this.host.saveSettings();
+        }));
+    new Setting(rag).setName('Передавать фрагменты заметок облачной модели')
+      .setDesc('Отдельное разрешение для RAG при облачной модели. Выбранные фрагменты личных заметок отправляются провайдеру вместе с запросом. По умолчанию выключено; поиск по индексу остаётся локальным.')
+      .addToggle((toggle) => toggle
+        .setValue(this.host.settings.allowCloudVaultContext)
+        .onChange(async (value) => {
+          this.host.settings.allowCloudVaultContext = value;
+          await this.host.saveSettings();
+        }));
     new Setting(model).setName('Проверить модель').setDesc('Отправляет короткий тестовый запрос выбранной модели.').addButton((button) => button.setButtonText('Проверить').onClick(async () => {
       try { await checkModel(this.host.settings); new Notice('Модель ответила на тестовый запрос'); }
       catch (error) { new Notice(error instanceof Error ? error.message : String(error), 8000); }
@@ -264,7 +304,7 @@ export class InvestSettingTab extends PluginSettingTab {
         const config = await loadConfig(this.app, this.host.settings);
         const window = recentWindow(new Date());
         const newsTask = () => collectNews(config.companies, config.publications, config.channels, this.host.settings, window.start, window.end,
-          (channel, start, end) => this.host.telegram.readChannel(channel, start, end));
+          (channel, start, end) => this.host.telegram.readChannel(channel, start, end), readRenderedCompanyPage);
         const marketTask = () => fetchMarket(this.host.settings);
         const [news, market] = this.host.settings.llmProvider === 'cloud'
           ? await Promise.all([newsTask(), marketTask()])

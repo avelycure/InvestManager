@@ -2,6 +2,7 @@ import { App, TFile } from 'obsidian';
 import { parseConfigRows } from './markdown-config';
 import { parseTopics } from './topic-config';
 import { publicSourceUrl } from './public-source-url';
+import { validBrandColor } from './company-brand';
 import type { Channel, Company, ConfigFiles, InvestSettings, Publication } from './types';
 
 function validateUrl(url: string, path: string, line: number): void {
@@ -24,10 +25,13 @@ function parseCompanies(content: string, path: string): Company[] {
   const items = parseConfigRows(content, path, ['Название', 'Тикер']).map(({ line, cells }) => {
     const ticker = cells['Тикер']?.toUpperCase() ?? '';
     if (!/^[A-Z0-9_.-]+$/.test(ticker)) throw new Error(`${path}:${line}: некорректный тикер`);
+    const color = cells['Цвет']?.trim();
+    if (color && !validBrandColor(color)) throw new Error(`${path}:${line}: «Цвет» должен быть в формате #RRGGBB`);
     if (cells['Инвесторам']) validateUrl(cells['Инвесторам'], path, line);
     const news = cells['Пресс центр компании'] || cells['Пресс-центр компании'];
     if (news) validateUrl(news, path, line);
-    return { name: cells['Название'] ?? '', ticker, investors: cells['Инвесторам'] || undefined, news: news || undefined };
+    return { name: cells['Название'] ?? '', ticker, color: color || undefined,
+      investors: cells['Инвесторам'] || undefined, news: news || undefined };
   });
   return unique(items, (item) => item.ticker, path);
 }

@@ -1,11 +1,16 @@
-import { Component, ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
+import { Component, ItemView, MarkdownRenderer, Menu, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
 import { latestReportSection } from './report-sections';
+import { HelpModal } from './help-modal';
+import { internalNoteLink } from './internal-note-link';
+import { applyCompanyCardColors } from './company-brand';
+import type { HelpExchange } from './help';
 import type { DigestResult, NewsFeedback, NewsRating, SelectedNews } from './types';
 
 export const INVEST_VIEW_TYPE = 'invest-manager-agent';
 
 export interface AgentActions {
   runDigest(): Promise<void>;
+  askHelp(question: string, history: HelpExchange[]): Promise<string>;
   openReport(path: string): Promise<void>;
   loadLatestReport(): Promise<{ path: string; markdown: string } | undefined>;
   loadFeedback(): Promise<NewsFeedback[]>;
@@ -15,13 +20,16 @@ export interface AgentActions {
 
 export class AgentView extends ItemView {
   private statusEl?: HTMLElement;
+  private digestButton?: HTMLButtonElement;
+  private digestButtonLabel?: HTMLSpanElement;
+  private digestButtonSpinner?: HTMLSpanElement;
   private reportEl?: HTMLElement;
   private reportBody?: HTMLElement;
   private renderComponent?: Component;
   private renderVersion = 0;
   private renderQueue: Promise<void> = Promise.resolve();
-  private actionButtons: HTMLButtonElement[] = [];
   private current?: DigestResult;
+  private renderedReportPath = '';
 
   constructor(leaf: WorkspaceLeaf, private actions: AgentActions, latest?: DigestResult) {
     super(leaf);
@@ -42,31 +50,58 @@ export class AgentView extends ItemView {
     digest.createEl('h2', { text: 'Ежедневная сводка' });
     digest.createEl('p', { text: 'Новости, рынок, ставки, график IMOEX, графики и капитализация компаний.' });
     const controls = digest.createDiv({ cls: 'invest-manager-action-controls' });
-    const digestButton = controls.createEl('button', { text: 'Сформировать сводку', cls: 'mod-cta invest-manager-action-button' });
-    this.registerDomEvent(digestButton, 'click', () => { void this.runAction(() => this.actions.runDigest()); });
+    const digestButton = controls.createEl('button', {
+      cls: 'mod-cta invest-manager-action-button', attr: { type: 'button', 'aria-busy': 'false' },
+    });
+    this.digestButton = digestButton;
+    this.digestButtonSpinner = digestButton.createSpan({
+      cls: 'invest-manager-action-spinner', attr: { 'aria-hidden': 'true', hidden: 'true' },
+    });
+    this.digestButtonLabel = digestButton.createSpan({
+      cls: 'invest-manager-action-label', text: 'Сформировать сводку', attr: { 'aria-live': 'polite' },
+    });
+    this.registerDomEvent(digestButton, 'click', () => { void this.actions.runDigest(); });
     this.reportEl = controls.createDiv({ cls: 'invest-manager-report-link' });
 
-    this.actionButtons = [digestButton];
     this.statusEl = root.createDiv({ cls: 'invest-manager-status' });
     this.statusEl.hidden = true;
     this.reportBody = root.createDiv({ cls: 'invest-manager-report markdown-rendered' });
+    this.registerDomEvent(this.reportBody, 'click', (event) => {
+      if (!this.reportBody) return;
+      const link = internalNoteLink(event.target, this.reportBody);
+      if (!link) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.app.workspace.openLinkText(link, this.renderedReportPath, 'tab').catch(() => {
+        new Notice('Не удалось открыть заметку', 5000);
+      });
+    });
     this.reportBody.setText('Отчёт появится здесь после формирования.');
     if (this.current) this.showDigest(this.current);
     void this.restoreReport();
   }
 
-  private async runAction(action: () => Promise<void>): Promise<void> {
-    for (const button of this.actionButtons) button.disabled = true;
-    try { await action(); }
-    finally {
-      for (const button of this.actionButtons) button.disabled = false;
-    }
+  onPaneMenu(menu: Menu, source: string): void {
+    super.onPaneMenu(menu, source);
+    if (source !== 'more-options') return;
+    menu.addItem((item) => item.setTitle('Помощь').setIcon('circle-help')
+      .onClick(() => { new HelpModal(this.app, (question, history) => this.actions.askHelp(question, history)).open(); }));
   }
 
   setStatus(message: string): void {
     if (!this.statusEl) return;
     this.statusEl.setText(message);
     this.statusEl.hidden = !message;
+  }
+
+  setProgress(message: string): void {
+    if (!this.digestButton || !this.digestButtonLabel || !this.digestButtonSpinner) return;
+    const loading = Boolean(message);
+    this.digestButtonLabel.setText(message || 'Сформировать сводку');
+    this.digestButtonSpinner.hidden = !loading;
+    this.digestButton.disabled = loading;
+    this.digestButton.setAttribute('aria-busy', String(loading));
+    this.digestButton.toggleClass('is-loading', loading);
   }
 
   setReport(path: string): void {
@@ -105,11 +140,13 @@ export class AgentView extends ItemView {
 
   private async renderReport(markdown: string, path: string): Promise<void> {
     if (!this.reportBody) return;
+    this.renderedReportPath = path;
     if (this.renderComponent) this.removeChild(this.renderComponent);
     this.reportBody.empty();
     const component = this.addChild(new Component());
     this.renderComponent = component;
     await MarkdownRenderer.render(this.app, markdown, this.reportBody, path, component);
+    applyCompanyCardColors(this.reportBody);
     await this.attachRatings();
   }
 

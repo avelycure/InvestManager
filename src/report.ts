@@ -1,7 +1,7 @@
 import { App, FileSystemAdapter, TFile, TFolder } from 'obsidian';
 import { legacyReportPath, reportPath } from './report-path';
 import { assertNoSymlink } from './report-guard';
-import { linkPreviousStockReportEmbeds, removeLegacyIfrsSections, removeLegacyPeRows, removeStandaloneCompanyMetrics, retirePreviousImoexCharts, retirePreviousStockCharts, upgradeLatestImoexChart } from './report-sections';
+import { linkPreviousStockReportEmbeds, removeLegacyIfrsSections, removeLegacyPeRows, removeStandaloneCompanyMetrics, retirePreviousImoexCharts, retirePreviousStockCharts, stockChartTickers, upgradeLatestImoexChart } from './report-sections';
 import { imoexChartBlock } from './report-render';
 import type { DigestResult } from './types';
 export { renderDigest } from './report-render';
@@ -89,8 +89,7 @@ export class ReportStore {
       }
       if (existing instanceof TFile) {
         await this.app.vault.process(existing, (content) => {
-          const tickers = new Set<string>();
-          for (const match of markdown.matchAll(/^```invest-manager-stock\n([A-Z0-9._-]{1,24})(?:\n\d{4}-\d\d-\d\dT[^\n]+)?\n```$/gm)) tickers.add(match[1]!);
+          const tickers = stockChartTickers(markdown);
           for (const chart of assets) {
             const ticker = /^STOCK-([A-Z0-9._-]{1,24})-\d{8}-[0-9a-f]{8}\.svg$/.exec(chart.path.slice(folder.length + 1))?.[1];
             if (ticker) tickers.add(ticker);

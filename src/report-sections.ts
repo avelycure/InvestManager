@@ -23,8 +23,17 @@ export function upgradeLatestImoexChart(markdown: string, codeBlock: string): st
 }
 
 /** Older runs keep their news, while only the newest run loads stock charts. */
+export function stockChartTickers(markdown: string): Set<string> {
+  return new Set([...markdown.matchAll(/^(?:> )?```invest-manager-stock\n(?:> )?([A-Z0-9._-]{1,24})(?:\n(?:> )?\d{4}-\d\d-\d\dT[^\n]+)?\n(?:> )?```$/gm)]
+    .map((match) => match[1]!));
+}
+
 export function retirePreviousStockCharts(markdown: string): string {
-  return markdown.replace(/^```invest-manager-stock\n[A-Z0-9._-]{1,24}(?:\n\d{4}-\d\d-\d\dT[^\n]+)?\n```$/gm, '_График акции показан в последнем отчёте ниже._');
+  return markdown
+    .replace(/^> ```invest-manager-stock\n> [A-Z0-9._-]{1,24}(?:\n> \d{4}-\d\d-\d\dT[^\n]+)?\n> ```$/gm,
+      '> _График акции показан в последнем отчёте ниже._')
+    .replace(/^```invest-manager-stock\n[A-Z0-9._-]{1,24}(?:\n\d{4}-\d\d-\d\dT[^\n]+)?\n```$/gm,
+      '_График акции показан в последнем отчёте ниже._');
 }
 
 /** Keep the newest visible price chart for each ticker across repeated daily runs. */

@@ -37,7 +37,7 @@ interface FeedResult {
 
 function publicationFailure(error: unknown): string {
 	const known = ['Лента содержит некорректный XML', 'Пустая лента', 'Адрес не содержит ленту RSS или Atom',
-		'Лента слишком велика', 'Страница слишком велика', 'Источник не ответил за 25 секунд'];
+		'Лента слишком велика', 'Страница слишком велика', 'Источник не ответил за 25 секунд', 'Источник не ответил за 70 секунд'];
 	if (!(error instanceof Error)) return 'Сбой запроса; источник не сообщил причину';
 	if (known.includes(error.message) || /^Источник вернул HTTP \d{3}$/.test(error.message) || /^Источник вернул HTML вместо RSS/.test(error.message)) return error.message;
 	const status = (error as Error & { status?: unknown }).status;
@@ -72,13 +72,13 @@ async function requestFeed(url: string): Promise<RequestUrlResponse> {
 	}
 }
 
-async function withTimeout<T>(work: Promise<T>): Promise<T> {
+async function withTimeout<T>(work: Promise<T>, timeoutMs = SOURCE_TIMEOUT_MS): Promise<T> {
 	let timer: number | undefined;
 	try {
 		return await Promise.race([
 			work,
 			new Promise<never>((_, reject) => {
-				timer = window.setTimeout(() => reject(new Error('Источник не ответил за 25 секунд')), SOURCE_TIMEOUT_MS);
+				timer = window.setTimeout(() => reject(new Error(`Источник не ответил за ${Math.round(timeoutMs / 1000)} секунд`)), timeoutMs);
 			}),
 		]);
 	} finally {
@@ -142,24 +142,48 @@ async function fetchPublicationFeed(publication: Publication, pageUrl: string, s
 	return parseFeedWithHistory(feedResponse.text, { ...publication, url: feedUrl }, start, end);
 }
 
-async function fetchCompanySource(company: Company, pageUrl: string, start: Date, end: Date): Promise<FeedResult> {
-	const response = await requestUrl({ url: pageUrl, method: 'GET' });
-	if (response.text.length > MAX_FEED_BYTES) throw new Error('Страница слишком велика');
+async function fetchCompanySource(company: Company, pageUrl: string, start: Date, end: Date,
+  renderPage?: (url: string) => Promise<string>): Promise<FeedResult> {
 	const source = { name: `${company.name} · Пресс центр компании`, url: pageUrl };
-	const contentType = response.headers['content-type']?.toLowerCase() ?? '';
-	const looksLikeHtml = contentType.includes('text/html') || /^\s*(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(response.text);
 	let result: FeedResult;
-	if (looksLikeHtml) {
-		const feedUrl = discoverFeedUrl(response.text, pageUrl);
-		if (feedUrl) {
-			const feedResponse = await requestUrl({ url: feedUrl, method: 'GET' });
-			if (feedResponse.text.length > MAX_FEED_BYTES) throw new Error('Лента слишком велика');
-			result = parseFeedWithHistory(feedResponse.text, { ...source, url: feedUrl }, start, end);
-		} else {
-			const recent = parseCompanyNewsPage(response.text, pageUrl, company.name, start, end);
-			result = { ...recent, historyItems: parseCompanyNewsPage(response.text, pageUrl, company.name, sixMonthsBefore(end), end).items };
+  try {
+    const response = await requestUrl({ url: pageUrl, method: 'GET' });
+    if (response.text.length > MAX_FEED_BYTES) throw new Error('Страница слишком велика');
+    const contentType = response.headers['content-type']?.toLowerCase() ?? '';
+    const looksLikeHtml = contentType.includes('text/html') || /^\s*(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(response.text);
+    if (looksLikeHtml) {
+      const feedUrl = discoverFeedUrl(response.text, pageUrl);
+      if (feedUrl) {
+        const feedResponse = await requestUrl({ url: feedUrl, method: 'GET' });
+        if (feedResponse.text.length > MAX_FEED_BYTES) throw new Error('Лента слишком велика');
+        result = parseFeedWithHistory(feedResponse.text, { ...source, url: feedUrl }, start, end);
+      } else {
+        const recent = parseCompanyNewsPage(response.text, pageUrl, company.name, start, end);
+        result = { ...recent, historyItems: parseCompanyNewsPage(response.text, pageUrl, company.name, sixMonthsBefore(end), end).items };
+      }
+    } else result = parseFeedWithHistory(response.text, source, start, end);
+  } catch (error) {
+    if (!renderPage) throw error;
+    result = { items: [], issue: `Обычный запрос не удался: ${publicationFailure(error)}` };
+  }
+  if (renderPage && !result.items.length && !result.feed) {
+    try {
+      const html = await renderPage(pageUrl);
+      const recent = parseCompanyNewsPage(html, pageUrl, company.name, start, end);
+      const historical = parseCompanyNewsPage(html, pageUrl, company.name, sixMonthsBefore(end), end);
+      if (recent.items.length || historical.items.length) {
+        const merge = (original: NewsItem[], rendered: NewsItem[]): NewsItem[] =>
+          [...new Map([...original, ...rendered].map((item) => [item.url, item])).values()];
+        result = { items: merge(result.items, recent.items),
+          historyItems: merge(result.historyItems ?? [], historical.items), issue: recent.issue };
+      } else if (recent.issue) {
+        result.issue = recent.issue;
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'неизвестная ошибка';
+      result.issue = [result.issue, `Playwright MCP: ${reason}`].filter(Boolean).join('; ');
 		}
-	} else result = parseFeedWithHistory(response.text, source, start, end);
+  }
 	return { ...result, items: result.items.map((item) => ({ ...item, companySource: company.name })),
 		historyItems: result.historyItems?.map((item) => ({ ...item, companySource: company.name })) };
 }
@@ -266,10 +290,11 @@ export async function collectNews(
 	companies: Company[],
 	publications: Publication[],
 	channels: Channel[],
-	settings: Pick<InvestSettings, 'telegramProvider' | 'llmProvider'>,
+	settings: Pick<InvestSettings, 'telegramProvider' | 'llmProvider' | 'companyBrowserMode'>,
 	start: Date,
 	end: Date,
 	mtprotoReader?: (channel: Channel, start: Date, end: Date) => Promise<MtprotoChannelResult>,
+	renderCompanyPage?: (url: string) => Promise<string>,
 ): Promise<NewsCollection> {
 	const items: NewsItem[] = [];
 	const historyItems: NewsItem[] = [];
@@ -284,7 +309,8 @@ export async function collectNews(
 			return;
 		}
 		try {
-			const result = await withTimeout(fetchCompanySource(company, url, start, end));
+			const result = await withTimeout(fetchCompanySource(company, url, start, end,
+				settings.companyBrowserMode === 'fallback' ? renderCompanyPage : undefined), 70_000);
 			items.push(...result.items);
 			historyItems.push(...(result.historyItems ?? []).filter((item) => item.publishedAt < start));
 			if (result.issue) issues.push({ source, message: result.issue });

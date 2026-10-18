@@ -73,7 +73,7 @@ void test('report shows translated excerpts with links to original publications'
     windowStart: new Date('2026-10-16T06:00:00Z'), windowEnd: new Date('2026-10-17T06:00:00Z'),
     generatedAt: new Date('2026-10-17T06:05:00Z'), market: [], companies: [], world: [article, second], issues: [], checkedSources: 1,
   });
-  assert.equal((markdown.match(/#### ФРС/g) ?? []).length, 1);
+  assert.equal((markdown.match(/> \[!invest-topic\] 🗞️ ФРС · 2 новости/g) ?? []).length, 1);
   assert.match(markdown, /ФРС сохранила процентную ставку/);
   assert.match(markdown, /Председатель ФРС выступил после решения/);
   assert.match(markdown, /\[Foreign newspaper\]\(https:\/\/example\.com\/fed\)/);
@@ -94,11 +94,11 @@ void test('company block combines current and older publications without an empt
     issues: [], checkedSources: 1,
   });
   assert.match(markdown, /### 🏢 Компании в портфеле\n\n_Капитализация относится к выпуску акций/);
-  assert.match(markdown, /#### Фосагро · PHOR\n\n```invest-manager-stock\nPHOR\n2026-10-17T06:00:00.000Z\n```\n\n\*\*Капитализация выпуска:\*\* 732,19 млрд ₽ · \[Мосбиржа, ISS\]\(https:\/\/iss\.moex\.com\/PHOR\)\n\n\| Дата \| Публикация \| Источник \|/);
+  assert.match(markdown, /> \[!invest-company-1479b8\] 🏢 Фосагро · PHOR · 2 новости\n>\n> ```invest-manager-stock\n> PHOR\n> 2026-10-17T06:00:00.000Z\n> ```\n>\n> \*\*Капитализация выпуска:\*\* 732,19 млрд ₽ · \[Мосбиржа, ISS\]\(https:\/\/iss\.moex\.com\/PHOR\)\n>\n> \| Дата \| Публикация \| Источник \|/);
   assert.match(markdown, /Отчёт Фосагро/);
   assert.match(markdown, /Фосагро объявила результаты/);
   assert.match(markdown, /🕘 14 октября, 11:00/);
-  assert.match(markdown, /#### Газпром · GAZP\n\n```invest-manager-stock\nGAZP\n2026-10-17T06:00:00.000Z\n```\n\n\*\*Капитализация выпуска:\*\* нет данных\n\n_Датированных публикаций/);
+  assert.match(markdown, /> \[!invest-company\] 🏢 Газпром · GAZP · без публикаций\n>\n> ```invest-manager-stock\n> GAZP\n> 2026-10-17T06:00:00.000Z\n> ```\n>\n> \*\*Капитализация выпуска:\*\* нет данных\n>\n> _Датированных публикаций/);
   assert.match(markdown, /\[Издание\]\(https:\/\/example\.com\/old\)/);
   assert.doesNotMatch(markdown, /### 📰 Пресс центр компании|### 🕘 Последние новости компаний/);
 });
@@ -112,6 +112,70 @@ void test('older topic news is visibly separated and dated', () => {
     worldBackfill: [{ topic: 'Нефть', items: [old] }], issues: [], checkedSources: 1,
   });
   assert.match(markdown, /### 🕘 Последние доступные новости по темам · старше 24 часов/);
-  assert.match(markdown, /#### Нефть\n\n- \*\*Нефть подорожала\*\* · 14 октября, 11:00/);
+  assert.match(markdown, /> \[!invest-topic\] 🕘 Нефть · 1 новость\n>\n> - \*\*Нефть подорожала\*\* · 14 октября, 11:00/);
   assert.match(markdown, /Это не новости за указанный выше период/);
+});
+
+void test('report places topic notes under the heading and distinct event notes beside stories', () => {
+  const story = { title: 'Решение ФРС', text: '', url: 'https://example.com/fed', source: 'Издание',
+    publishedAt: new Date('2026-10-17T05:00:00Z'), category: 'world' as const, topic: 'Ключевая ставка', reason: '' };
+  const markdown = renderDigest({
+    windowStart: new Date('2026-10-16T06:00:00Z'), windowEnd: new Date('2026-10-17T06:00:00Z'),
+    generatedAt: new Date('2026-10-17T06:05:00Z'), market: [], world: [story], companies: [],
+    companyNews: [{ company: 'Фосагро', ticker: 'PHOR', press: [], news: [] }],
+    relatedNotes: { companies: { PHOR: ['[[Идеи/ФосАгро.md|ФосАгро]]'] },
+      topics: { 'Ключевая ставка': ['[[Макро/ДКП.md|ДКП]]'] },
+      events: { [`${story.url}\u0000${story.title}`]: [
+        '[[Макро/ДКП.md|ДКП]]', '[[История/ФРС.md|История ФРС]]'] } },
+    issues: [], checkedSources: 1,
+  });
+  assert.match(markdown, /> \[!invest-company-1479b8\] 🏢 Фосагро · PHOR[\s\S]*\*\*Мои заметки:\*\* \[\[Идеи\/ФосАгро\.md\|ФосАгро\]\]/);
+  assert.match(markdown, /> \[!invest-topic\] 🗞️ Ключевая ставка · 1 новость\n>\n> \*\*Мои заметки:\*\* \[\[Макро\/ДКП\.md\|ДКП\]\]/);
+  assert.match(markdown, /\*\*Решение ФРС\*\*[\s\S]*📎 Мои заметки: \[\[История\/ФРС\.md\|История ФРС\]\]/);
+  assert.equal((markdown.match(/\[\[Макро\/ДКП\.md/g) ?? []).length, 1);
+  assert.equal((markdown.match(/\[\[Идеи\/ФосАгро\.md/g) ?? []).length, 1);
+});
+
+void test('world topics become separate cards with counts and news links inside each card', () => {
+  const item = (topic: string, title: string, suffix: string) => ({
+    title, text: '', url: `https://example.com/${suffix}`, source: 'Издание',
+    publishedAt: new Date('2026-10-17T05:00:00Z'), category: 'world' as const, topic, reason: '',
+  });
+  const markdown = renderDigest({
+    windowStart: new Date('2026-10-16T06:00:00Z'), windowEnd: new Date('2026-10-17T06:00:00Z'),
+    generatedAt: new Date('2026-10-17T06:05:00Z'), market: [], companies: [],
+    world: [item('США', 'Первая новость', 'first'), item('США', 'Вторая новость', 'second'),
+      item('Израиль', 'Третья новость', 'third')], issues: [], checkedSources: 1,
+  });
+  assert.equal((markdown.match(/> \[!invest-topic\]/g) ?? []).length, 2);
+  assert.match(markdown, /> \[!invest-topic\] 🗞️ США · 2 новости\n>\n> - \*\*Первая новость\*\*/);
+  assert.match(markdown, /> \[!invest-topic\] 🗞️ Израиль · 1 новость\n>\n> - \*\*Третья новость\*\*/);
+  assert.match(markdown, /> - \*\*Вторая новость\*\*[^\n]*\[Издание\]\(https:\/\/example\.com\/second\)/);
+});
+
+void test('company publication shows its own related note in the publication row', () => {
+  const story = { title: 'Фосагро открыла новый комплекс', text: '', url: 'https://example.com/phor',
+    source: 'Пресс-центр', publishedAt: new Date('2026-10-17T05:00:00Z'),
+    category: 'company' as const, company: 'Фосагро', reason: '' };
+  const markdown = renderDigest({
+    windowStart: new Date('2026-10-16T06:00:00Z'), windowEnd: new Date('2026-10-17T06:00:00Z'),
+    generatedAt: new Date('2026-10-17T06:05:00Z'), market: [], world: [], companies: [story],
+    companyNews: [{ company: 'Фосагро', ticker: 'PHOR', press: [story], news: [] }],
+    relatedNotes: { companies: { PHOR: [] }, topics: {},
+      events: { [`${story.url}\u0000${story.title}`]: ['[[Проекты/Новый комплекс.md|Новый комплекс]]'] } },
+    issues: [], checkedSources: 1,
+  });
+  assert.match(markdown, /Фосагро открыла новый комплекс\*\*<br>📎 Мои заметки: \[\[Проекты\/Новый комплекс\.md\|Новый комплекс\]\]/);
+});
+
+void test('company card encodes a safe brand accent and allows a Markdown override', () => {
+  const result: DigestResult = {
+    windowStart: new Date('2026-10-16T06:00:00Z'), windowEnd: new Date('2026-10-17T06:00:00Z'),
+    generatedAt: new Date('2026-10-17T06:05:00Z'), market: [], world: [], companies: [],
+    companyNews: [{ company: 'Сбер', ticker: 'SBER', press: [], news: [] }],
+    issues: [], checkedSources: 1,
+  };
+  assert.match(renderDigest(result), /> \[!invest-company-21a038\] 🏢 Сбер · SBER/);
+  assert.match(renderDigest(result, [{ name: 'Сбер', ticker: 'SBER', color: '#345abc' }]),
+    /> \[!invest-company-345abc\] 🏢 Сбер · SBER/);
 });

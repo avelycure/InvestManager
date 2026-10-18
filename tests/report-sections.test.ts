@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { latestReportSection, linkPreviousChartEmbeds, linkPreviousStockReportEmbeds, removeLegacyIfrsSections, removeLegacyPeRows, removeStandaloneCompanyMetrics, retirePreviousImoexCharts, retirePreviousStockCharts, upgradeLatestImoexChart } from '../src/report-sections.ts';
+import { latestReportSection, linkPreviousChartEmbeds, linkPreviousStockReportEmbeds, removeLegacyIfrsSections, removeLegacyPeRows, removeStandaloneCompanyMetrics, retirePreviousImoexCharts, retirePreviousStockCharts, stockChartTickers, upgradeLatestImoexChart } from '../src/report-sections.ts';
 
 void test('repeated digest keeps one visible embed of an unchanged chart', () => {
   const chart = 'Статистика/2026/октябрь/IMOEX-abc.svg';
@@ -18,6 +18,16 @@ void test('repeat run retires old interactive stock charts while preserving arti
   const combined = `${retirePreviousStockCharts(old)}\n\n${next}`;
   assert.equal((combined.match(/```invest-manager-stock/g) ?? []).length, 1);
   assert.match(combined, /\| Новость \| Источник \|/);
+});
+
+void test('company cards retire quoted stock charts on the next run', () => {
+  const old = '> [!invest-company] 🏢 Сбер · SBER\n>\n> ```invest-manager-stock\n> SBER\n> 2026-10-17T06:00:00.000Z\n> ```\n>\n> | Новость | Источник |';
+  const next = '> [!invest-company] 🏢 Сбер · SBER\n>\n> ```invest-manager-stock\n> SBER\n> 2026-10-18T06:00:00.000Z\n> ```';
+  assert.deepEqual([...stockChartTickers(next)], ['SBER']);
+  const combined = `${retirePreviousStockCharts(old)}\n\n${next}`;
+  assert.equal((combined.match(/```invest-manager-stock/g) ?? []).length, 1);
+  assert.match(combined, /> _График акции показан в последнем отчёте ниже\._/);
+  assert.match(combined, /> \| Новость \| Источник \|/);
 });
 
 void test('new interactive IMOEX chart retires old SVG and older controls', () => {

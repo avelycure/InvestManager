@@ -29,4 +29,5 @@ void test('company starter file has a separate press center column', () => {
   assert.ok(template);
   const rows = parseConfigRows(template.markdown, template.path, ['Название', 'Тикер']);
   assert.equal(rows[0]?.cells['Пресс центр компании'], 'https://example.com/news');
+  assert.equal(rows[0]?.cells['Цвет'], '#21A038');
 });

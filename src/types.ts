@@ -1,6 +1,7 @@
 export interface Company {
   name: string;
   ticker: string;
+  color?: string;
   investors?: string;
   news?: string;
 }
@@ -33,12 +34,14 @@ export type RateProvider = 'cbr' | 'off';
 export type GoldProvider = 'moex' | 'off';
 export type ImoexProvider = 'moex' | 'off';
 export type LlmProvider = 'local' | 'cloud';
+export type CompanyBrowserMode = 'fallback' | 'off';
 
 export interface InvestSettings {
   companiesPath: string;
   topicsPath: string;
   channelsPath: string;
   publicationsPath: string;
+  companyBrowserMode: CompanyBrowserMode;
   outputFolder: string;
   digestReadyTime: string;
   telegramProvider: TelegramProvider;
@@ -59,6 +62,8 @@ export interface InvestSettings {
   cloudLlmModel: string;
   cloudLlmSecretId: string;
   cloudLlmApiKey: string;
+  ragEnabled: boolean;
+  allowCloudVaultContext: boolean;
   lastAutomaticDate: string;
   lastDigest?: SavedDigest;
 }
@@ -68,6 +73,7 @@ export const DEFAULT_SETTINGS: InvestSettings = {
   topicsPath: '',
   channelsPath: '',
   publicationsPath: '',
+  companyBrowserMode: 'fallback',
   outputFolder: 'Статистика',
   digestReadyTime: '09:00',
   telegramProvider: 'public-web',
@@ -88,6 +94,8 @@ export const DEFAULT_SETTINGS: InvestSettings = {
   cloudLlmModel: 'gpt-5.4-mini',
   cloudLlmSecretId: '',
   cloudLlmApiKey: '',
+  ragEnabled: false,
+  allowCloudVaultContext: false,
   lastAutomaticDate: '',
 };
 
@@ -144,6 +152,12 @@ export interface SourceIssue {
   message: string;
 }
 
+export interface RelatedNotes {
+  companies: Record<string, string[]>;
+  topics: Record<string, string[]>;
+  events?: Record<string, string[]>;
+}
+
 export interface DigestResult {
   windowStart: Date;
   windowEnd: Date;
@@ -152,6 +166,7 @@ export interface DigestResult {
   companies: SelectedNews[];
   companyNews?: Array<{ company: string; ticker?: string; press: SelectedNews[]; news: SelectedNews[] }>;
   companyCapitalizations?: Record<string, { valueRub: number; url: string }>;
+  relatedNotes?: RelatedNotes;
   worldBackfill?: Array<{ topic: string; items: SelectedNews[] }>;
   market: DataPoint[];
   imoex?: IndexSeries;
@@ -170,6 +185,7 @@ export interface SavedDigest {
   companyNews?: Array<{ company: string; ticker?: string; press: Array<Omit<SelectedNews, 'publishedAt'> & { publishedAt: string }>;
     news: Array<Omit<SelectedNews, 'publishedAt'> & { publishedAt: string }> }>;
   companyCapitalizations?: Record<string, { valueRub: number; url: string }>;
+  relatedNotes?: RelatedNotes;
   worldBackfill?: Array<{ topic: string; items: Array<Omit<SelectedNews, 'publishedAt'> & { publishedAt: string }> }>;
   market: DataPoint[];
   imoex?: IndexSeries;
