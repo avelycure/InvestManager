@@ -210,6 +210,10 @@ async function main() {
   const files = git('ls-files', '-z').split('\0').filter(Boolean);
   const context = await retrieveEmbeddedContext(files, changedFiles, diff, (path) => readFileSync(path, 'utf8'),
     { apiKey, baseUrl: embeddingBaseUrl, model: embeddingModel });
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const fragments = (context.match(/^### /gm) ?? []).length;
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `RAG: ${fragments} фрагментов из README, docs и кода; модель эмбеддингов ${embeddingModel}.\n`);
+  }
   const review = await completeReview(reviewPrompt(changedFiles, diff, context), apiKey, baseUrl, model);
   const url = await publishReview(repository, Number(pullNumber), headSha, token, review);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `AI-ревью: ${url}\n`);
