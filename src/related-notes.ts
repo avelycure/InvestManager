@@ -8,6 +8,7 @@ interface Candidate {
 }
 
 export const MAX_EVENT_NOTE_LINKS = 5;
+// The report omits links already shown under a topic or company, so keep spare hits.
 const MAX_EVENT_NOTE_CANDIDATES = MAX_EVENT_NOTE_LINKS * 2;
 
 function normalized(value: string): string {
