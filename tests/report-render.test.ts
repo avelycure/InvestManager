@@ -168,6 +168,30 @@ void test('company publication shows its own related note in the publication row
   assert.match(markdown, /Фосагро открыла новый комплекс\*\*<br>📎 Мои заметки: \[\[Проекты\/Новый комплекс\.md\|Новый комплекс\]\]/);
 });
 
+void test('topic and company news render five related links after removing section duplicates', () => {
+  const topicStory = { title: 'США и Вьетнам договорились о сотрудничестве', text: '',
+    url: 'https://example.com/topic', source: 'Издание', publishedAt: new Date('2026-10-17T05:00:00Z'),
+    category: 'world' as const, topic: 'США', reason: '' };
+  const companyStory = { title: 'Фосагро открыла новый комплекс', text: '',
+    url: 'https://example.com/company', source: 'Пресс-центр', publishedAt: new Date('2026-10-17T05:00:00Z'),
+    category: 'company' as const, company: 'Фосагро', reason: '' };
+  const links = (prefix: string) => Array.from({ length: 6 }, (_, index) =>
+    `[[Заметки/${prefix} ${index + 1}.md|${prefix} ${index + 1}]]`);
+  const markdown = renderDigest({
+    windowStart: new Date('2026-10-16T06:00:00Z'), windowEnd: new Date('2026-10-17T06:00:00Z'),
+    generatedAt: new Date('2026-10-17T06:05:00Z'), market: [], world: [topicStory], companies: [companyStory],
+    companyNews: [{ company: 'Фосагро', ticker: 'PHOR', press: [companyStory], news: [] }],
+    relatedNotes: { companies: { PHOR: [] }, topics: { США: [links('Тема')[0]!] }, events: {
+      [`${topicStory.url}\u0000${topicStory.title}`]: links('Тема'),
+      [`${companyStory.url}\u0000${companyStory.title}`]: links('Компания'),
+    } }, issues: [], checkedSources: 1,
+  });
+  for (let number = 2; number <= 6; number++) assert.match(markdown, new RegExp(`Тема ${number}\\.md`));
+  assert.equal((markdown.match(/Тема 1\.md/g) ?? []).length, 1);
+  for (let number = 1; number <= 5; number++) assert.match(markdown, new RegExp(`Компания ${number}\\.md`));
+  assert.doesNotMatch(markdown, /Компания 6\.md/);
+});
+
 void test('company card encodes a safe brand accent and allows a Markdown override', () => {
   const result: DigestResult = {
     windowStart: new Date('2026-10-16T06:00:00Z'), windowEnd: new Date('2026-10-17T06:00:00Z'),

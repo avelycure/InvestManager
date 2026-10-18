@@ -18,9 +18,9 @@ import type { RagContext } from './rag-context';
 import type { Channel, ConfigFiles, DigestResult, InvestSettings, NewsFeedback, SelectedNews, SourceIssue } from './types';
 import type { MtprotoChannelResult } from './telegram-mtproto';
 
-const MAX_PER_SECTION = 8;
-const MAX_WORLD_PER_TOPIC = 5;
-const MAX_WORLD_CANDIDATES = 15;
+const MAX_PER_SECTION = 10;
+const MAX_WORLD_PER_TOPIC = 10;
+const MAX_WORLD_CANDIDATES = 25;
 
 async function translateOlderTitles(settings: InvestSettings, items: SelectedNews[]): Promise<{ titles: Map<string, string>; failures: number }> {
   const untranslated = items.filter((item) => needsRussianTranslation(item.title) && !item.titleRu
@@ -212,7 +212,8 @@ export async function buildDigest(
       issues.push({ source: 'Темы новостей', message: `Не удалось проверить старые публикации: ${error instanceof Error ? error.message : 'ошибка модели'}` });
     }
   }
-  let olderWorld = worldBackfill(config, visibleWorld, historical, start, 5, config.topics.length * 5,
+  let olderWorld = worldBackfill(config, visibleWorld, historical, start, MAX_WORLD_PER_TOPIC,
+    config.topics.length * MAX_WORLD_PER_TOPIC,
     historicalTopics, configuredModel(settings))
     .map((group) => ({ ...group, items: group.items.filter((item) => !excludedByFeedback(feedback, item)) }))
     .filter((group) => group.items.length > 0);

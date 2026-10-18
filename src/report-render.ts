@@ -1,7 +1,7 @@
 import { moscowDateKey, moscowHourMinute } from './time.ts';
 import { formatRub } from './moex-company-market-data.ts';
 import type { DataPoint, DigestResult, RelatedNotes, SelectedNews, SourceIssue } from './types';
-import { eventNoteKey } from './related-notes.ts';
+import { eventNoteKey, MAX_EVENT_NOTE_LINKS } from './related-notes.ts';
 import { companyBrandColor, companyCalloutType } from './company-brand.ts';
 import type { Company } from './types';
 
@@ -98,7 +98,7 @@ function detailedNews(items: SelectedNews[], reportYear: string, relatedNotes?: 
     const [year = '', month = '', day = ''] = moscowDateKey(item.publishedAt).split('-');
     const published = item.publishedTimeKnown === false ? readableDate(year, month, day, reportYear) : dateTime(item.publishedAt, reportYear);
     const notes = relatedNotes?.events?.[eventNoteKey(item)]?.filter((link) => !sectionNotes.includes(link))
-      .slice(0, 2).join(' · ');
+      .slice(0, MAX_EVENT_NOTE_LINKS).join(' · ');
     return `- ${label}**${safeText(shorten(title, 180))}** · ${published} · ${sources(item)}${notes ? `\n  - 📎 Мои заметки: ${notes}` : ''}`;
   }).join('\n');
 }
@@ -143,7 +143,7 @@ function companyNews(groups: NonNullable<DigestResult['companyNews']>, windowSta
   configuredCompanies: Company[] = []): string {
   if (!groups.length) return '> [!info] Компании не указаны в файле портфеля.';
   return [
-    '_До пяти публикаций пресс-центра и трёх новостей из других источников на компанию. 🕘 — опубликовано раньше указанного периода._',
+    '_До пяти публикаций пресс-центра и пяти новостей из других источников на компанию. 🕘 — опубликовано раньше указанного периода._',
     '',
     groups.map((group) => {
       const items = [...group.press, ...group.news].sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
@@ -163,7 +163,7 @@ function companyNews(groups: NonNullable<DigestResult['companyNews']>, windowSta
         const published = item.publishedTimeKnown === false ? readableDate(year, month, day, reportYear) : dateTime(item.publishedAt, reportYear);
         const date = `${item.publishedAt < windowStart ? '🕘 ' : ''}${published}`;
         const notes = relatedNotes?.events?.[eventNoteKey(item)]?.filter((link) =>
-          !relatedNotes?.companies[ticker]?.includes(link)).slice(0, 2).join(' · ');
+          !relatedNotes?.companies[ticker]?.includes(link)).slice(0, MAX_EVENT_NOTE_LINKS).join(' · ');
         return [safeText(date), `**${safeText(shorten(item.titleRu ?? item.title, 180))}**${notes ? `<br>📎 Мои заметки: ${notes}` : ''}`, sources(item)];
       });
       return reportCard(cardType, title,

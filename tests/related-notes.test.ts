@@ -54,6 +54,19 @@ void test('semantic links use the event, including historical context, and rejec
   assert.deepEqual(result.events?.[`${item.url}\u0000${item.title}`], ['[[История/Война во Вьетнаме.md|Война во Вьетнаме]]']);
 });
 
+void test('each news event keeps extra verified candidates so the report can omit section duplicates', async () => {
+  const files = Array.from({ length: 7 }, (_, index) => file(`История/Контекст ${index + 1}.md`));
+  const search = async (_query: string): Promise<unknown> => ({ results: [
+    ...files.map((item, index) => ({ score: 0.95 - index * 0.01,
+      chunk: { text: 'США и Вьетнам', metadata: { source: item.path } } })),
+    { score: 0.99, chunk: { text: 'США и Вьетнам', metadata: { source: files[0]!.path } } },
+  ] });
+  const item = news('США и Вьетнам обсудили развитие отношений', 'https://example.com/five-notes');
+  const result = await findRelatedNotes(app(files, {}, search), config, 'Статистика/отчёт.md', true, [item]);
+  assert.deepEqual(result.events?.[`${item.url}\u0000${item.title}`], [1, 2, 3, 4, 5, 6, 7]
+    .map((number) => `[[История/Контекст ${number}.md|Контекст ${number}]]`));
+});
+
 void test('unrelated event does not inherit notes from the same topic', async () => {
   const files = [file('История/Хиросима и Нагасаки.md'), file('Политика/История США.md')];
   const search = async (_query: string): Promise<unknown> => ({ results: [
