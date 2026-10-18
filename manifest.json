@@ -2,8 +2,8 @@
   "id": "invest-manager",
   "name": "Invest Manager",
   "version": "0.1.0",
-  "minAppVersion": "1.0.0",
+  "minAppVersion": "1.11.4",
   "description": "Manage investments in Obsidian.",
   "author": "Ivan Emelin",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

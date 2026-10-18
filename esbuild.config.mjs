@@ -10,6 +10,7 @@ const context = await esbuild.context({
     'electron',
     '@codemirror/*',
     '@lezer/*',
+    'node:*',
     ...builtinModules,
   ],
   format: 'cjs',
