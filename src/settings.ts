@@ -182,7 +182,7 @@ export class InvestSettingTab extends PluginSettingTab {
       }));
     const rag = this.section('Контекст проекта (RAG)');
     new Setting(rag).setName('Использовать RAG')
-      .setDesc('При составлении отчёта искать подходящие заметки через установленный плагин AI Advent RAG и учитывать их при выборе новостей. Индекс создаётся и хранится в AI Advent RAG.')
+      .setDesc('При составлении отчёта искать подходящие заметки через установленный плагин AskMyMind и учитывать их при выборе новостей. Индекс создаётся и хранится в AskMyMind.')
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.ragEnabled)
         .onChange(async (value) => {

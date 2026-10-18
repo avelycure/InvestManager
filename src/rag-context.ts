@@ -34,7 +34,7 @@ export async function projectRagContext(app: App, config: ConfigFiles, settings:
     return { text: '', issue: 'Включите отдельное разрешение на передачу фрагментов заметок облачной модели' };
   }
   const plugin = ragPlugin(app);
-  if (!plugin) return { text: '', issue: 'Плагин AI Advent RAG не включён или не предоставляет поиск' };
+  if (!plugin) return { text: '', issue: 'Плагин AskMyMind не включён или не предоставляет поиск' };
 
   const queries = [
     config.companies.map((company) => `${company.name} ${company.ticker}`).join(', '),
@@ -65,8 +65,8 @@ export async function projectRagContext(app: App, config: ConfigFiles, settings:
       if (snippets.length >= 6) break;
     }
     return { text: snippets.join('\n\n').slice(0, 4_000),
-      issue: snippets.length ? undefined : 'Индекс AI Advent RAG не нашёл подходящих заметок' };
+      issue: snippets.length ? undefined : 'Индекс AskMyMind не нашёл подходящих заметок' };
   } catch (error) {
-    return { text: '', issue: `Поиск AI Advent RAG не удался: ${error instanceof Error ? error.message : String(error)}` };
+    return { text: '', issue: `Поиск AskMyMind не удался: ${error instanceof Error ? error.message : String(error)}` };
   }
 }

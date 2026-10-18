@@ -17,7 +17,7 @@ export default defineConfig(
       globals: globals.browser,
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['eslint.config.mts', 'manifest.json'],
+          allowDefaultProject: ['eslint.config.mts', 'manifest.json', 'scripts/ai-review.mjs', 'scripts/ai-review.test.mjs'],
         },
         tsconfigRootDir: import.meta.dirname,
         extraFileExtensions: ['.json'],
@@ -25,4 +25,12 @@ export default defineConfig(
     },
   },
   ...obsidianmd.configs.recommended,
+  {
+    files: ['scripts/**/*.mjs'],
+    rules: {
+      // These tools run in Node.js, outside Obsidian's renderer.
+      'no-restricted-globals': 'off',
+      'obsidianmd/no-global-this': 'off',
+    },
+  },
 );
