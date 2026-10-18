@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { candidateFiles, compactDiff, publishReview, retrieveContext, reviewPrompt } from './ai-review.mjs';
+import { candidateFiles, compactDiff, createEmbeddings, publishReview, retrieveContext,
+  retrieveEmbeddedContext, reviewPrompt } from './ai-review.mjs';
 
 test('retrieval includes related documentation and code, but ignores generated files', () => {
   const files = ['README.md', 'docs/architecture.md', 'src/report.ts', 'src/news.ts', 'package-lock.json', 'main.js'];
@@ -25,6 +26,39 @@ test('review prompt bounds large diffs and still lists every changed file', () =
   assert.match(prompt, /README\.md:1/);
   assert.match(compactDiff(diff, 2_000), /diff опущена/);
   assert.ok(prompt.length < 32_000);
+});
+
+test('embedding retrieval finds semantically related docs without shared words', async () => {
+  const files = ['README.md', 'docs/security.md', 'src/report.ts'];
+  const body = new Map([
+    ['README.md', 'The plugin creates a daily note.'],
+    ['docs/security.md', 'Only statistics folder is writable.'],
+    ['src/report.ts', 'export function saveReport() { return true; }'],
+  ]);
+  const requests = [];
+  const fetchImpl = async (_url, options) => {
+    const { input } = JSON.parse(options.body);
+    requests.push(input);
+    return new Response(JSON.stringify({ data: input.map((text, index) => ({ index,
+      embedding: text.includes('+ guard') || text.includes('docs/security.md') ? [1, 0] : text.includes('README.md') ? [0, 1]
+        : text.includes('src/report.ts') ? [0, 1] : [1, 0],
+    })).reverse() }), { status: 200 });
+  };
+  const context = await retrieveEmbeddedContext(files, ['src/report.ts'], '+ guard output path',
+    (path) => body.get(path), { apiKey: 'fake', baseUrl: 'https://example.com/v1', model: 'embed-test', fetchImpl }, 5_000);
+  assert.match(context, /docs\/security\.md:1/);
+  assert.doesNotMatch(context, /README\.md:1/);
+  assert.match(context, /src\/report\.ts:1/);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].length, 4);
+});
+
+test('embedding response validation rejects missing or malformed vectors', async () => {
+  await assert.rejects(createEmbeddings(['query'], 'fake', 'https://example.com/v1', 'embed-test',
+    async () => new Response(JSON.stringify({ data: [] }), { status: 200 })), /Некорректный ответ/);
+  await assert.rejects(createEmbeddings(['query'], 'fake', 'https://example.com/v1', 'embed-test',
+    async () => new Response(JSON.stringify({ data: [{ index: 0, embedding: [NaN] }] }), { status: 200 })),
+  /Некорректный вектор/);
 });
 
 test('a rerun updates the bot comment and rejects a stale PR head', async () => {

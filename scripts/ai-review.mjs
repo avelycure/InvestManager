@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 const MARKER = '<!-- invest-manager-ai-review -->';
 const MAX_DIFF = 30_000;
 const MAX_CONTEXT = 18_000;
+const MAX_EMBEDDING_CHUNKS = 100;
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.mjs', '.json', '.yml', '.yaml']);
 const SKIP = /(^|\/)(node_modules|dist|coverage|fixtures)(\/|$)|(^|\/)(package-lock\.json|main\.js)$|\.map$/;
 
@@ -25,7 +26,7 @@ export function candidateFiles(paths) {
     (path.endsWith('.md') || SOURCE_EXTENSIONS.has(extname(path))));
 }
 
-export function retrieveContext(files, changedFiles, diff, readFile, maxChars = MAX_CONTEXT) {
+export function contextChunks(files, changedFiles, diff, readFile) {
   const query = tokens(`${changedFiles.join(' ')} ${diff.slice(0, 20_000)}`);
   const chunks = [];
   for (const path of candidateFiles(files)) {
@@ -39,7 +40,11 @@ export function retrieveContext(files, changedFiles, diff, readFile, maxChars = 
       chunks.push({ path, start: start + 1, excerpt, score, docs: path.endsWith('.md') });
     }
   }
-  const ranked = chunks.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.start - b.start);
+  return chunks;
+}
+
+export function formatContext(chunks, maxChars = MAX_CONTEXT) {
+  const ranked = [...chunks].sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.start - b.start);
   const chosen = [];
   let used = 0;
   for (const kind of [true, false]) {
@@ -54,6 +59,79 @@ export function retrieveContext(files, changedFiles, diff, readFile, maxChars = 
     }
   }
   return chosen.join('\n');
+}
+
+export function retrieveContext(files, changedFiles, diff, readFile, maxChars = MAX_CONTEXT) {
+  return formatContext(contextChunks(files, changedFiles, diff, readFile), maxChars);
+}
+
+function apiUrl(baseUrl, endpoint, variable) {
+  const url = new URL(`${baseUrl.replace(/\/$/, '')}/${endpoint}`);
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new Error(`${variable} должен быть HTTPS-адресом без учётных данных и параметров`);
+  }
+  return url;
+}
+
+export async function createEmbeddings(inputs, apiKey, baseUrl, model, fetchImpl = fetch) {
+  const url = apiUrl(baseUrl, 'embeddings', 'AI_REVIEW_EMBEDDING_BASE_URL');
+  const vectors = [];
+  let dimensions;
+  for (let offset = 0; offset < inputs.length; offset += 32) {
+    const batch = inputs.slice(offset, offset + 32);
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, input: batch }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) throw new Error(`Модель эмбеддингов ответила HTTP ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data?.data) || data.data.length !== batch.length) throw new Error('Некорректный ответ модели эмбеддингов');
+    const ordered = [...data.data].sort((a, b) => a.index - b.index);
+    for (let index = 0; index < ordered.length; index++) {
+      const vector = ordered[index]?.embedding;
+      if (ordered[index]?.index !== index || !Array.isArray(vector) || !vector.length ||
+          !vector.every((number) => typeof number === 'number' && Number.isFinite(number)) ||
+          (dimensions && vector.length !== dimensions)) {
+        throw new Error('Некорректный вектор эмбеддинга');
+      }
+      dimensions = vector.length;
+      vectors.push(vector);
+    }
+  }
+  return vectors;
+}
+
+export function cosineSimilarity(left, right) {
+  if (left.length !== right.length) throw new Error('Размерности эмбеддингов не совпадают');
+  let dot = 0; let leftNorm = 0; let rightNorm = 0;
+  for (let index = 0; index < left.length; index++) {
+    dot += left[index] * right[index];
+    leftNorm += left[index] ** 2;
+    rightNorm += right[index] ** 2;
+  }
+  return leftNorm && rightNorm ? dot / Math.sqrt(leftNorm * rightNorm) : 0;
+}
+
+export async function retrieveEmbeddedContext(files, changedFiles, diff, readFile, embeddingOptions, maxChars = MAX_CONTEXT) {
+  const chunks = contextChunks(files, changedFiles, diff, readFile);
+  const docs = chunks.filter((chunk) => chunk.docs);
+  const code = chunks.filter((chunk) => !chunk.docs)
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.start - b.start);
+  const selected = [...docs.slice(0, MAX_EMBEDDING_CHUNKS), ...code.slice(0, Math.max(0, MAX_EMBEDDING_CHUNKS - docs.length))];
+  if (!selected.length) return '';
+  const addedLines = diff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+    .slice(0, 100).join('\n');
+  const query = `${changedFiles.join('\n')}\n${addedLines}`.slice(0, 4_000);
+  const vectors = await createEmbeddings([query, ...selected.map((chunk) => `${chunk.path}:${chunk.start}\n${chunk.excerpt}`)],
+    embeddingOptions.apiKey, embeddingOptions.baseUrl, embeddingOptions.model, embeddingOptions.fetchImpl);
+  const [queryVector, ...chunkVectors] = vectors;
+  const ranked = selected.map((chunk, index) => ({ ...chunk,
+    score: cosineSimilarity(queryVector, chunkVectors[index]) + Math.min(chunk.score, 12) * 0.01 +
+      (changedFiles.includes(chunk.path) ? 0.08 : 0),
+  }));
+  return formatContext(ranked, maxChars);
 }
 
 export function compactDiff(diff, maxChars = MAX_DIFF) {
@@ -83,8 +161,7 @@ async function github(path, token, method = 'GET', body) {
 }
 
 async function completeReview(prompt, apiKey, baseUrl, model) {
-  const url = new URL(`${baseUrl.replace(/\/$/, '')}/chat/completions`);
-  if (url.protocol !== 'https:' || url.username || url.password) throw new Error('AI_REVIEW_BASE_URL должен быть HTTPS-адресом без учётных данных');
+  const url = apiUrl(baseUrl, 'chat/completions', 'AI_REVIEW_BASE_URL');
   const response = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -122,6 +199,8 @@ async function main() {
     PR_NUMBER: pullNumber, PR_BASE_SHA: baseSha, PR_HEAD_SHA: headSha } = process.env;
   const baseUrl = process.env.AI_REVIEW_BASE_URL || 'https://api.openai.com/v1';
   const model = process.env.AI_REVIEW_MODEL || 'gpt-5.4-mini';
+  const embeddingBaseUrl = process.env.AI_REVIEW_EMBEDDING_BASE_URL || baseUrl;
+  const embeddingModel = process.env.AI_REVIEW_EMBEDDING_MODEL || 'text-embedding-3-small';
   if (!apiKey) throw new Error('Добавьте секрет AI_REVIEW_API_KEY в настройках репозитория');
   if (!token || !repository || !pullNumber || !baseSha || !headSha) throw new Error('Не хватает параметров GitHub Actions PR');
   if (!/^[0-9a-f]{40}$/.test(baseSha) || !/^[0-9a-f]{40}$/.test(headSha)) throw new Error('Некорректный SHA PR');
@@ -129,7 +208,8 @@ async function main() {
   if (!changedFiles.length) return;
   const diff = git('diff', '--unified=4', '--no-ext-diff', '--no-textconv', '--find-renames', baseSha, headSha, '--');
   const files = git('ls-files', '-z').split('\0').filter(Boolean);
-  const context = retrieveContext(files, changedFiles, diff, (path) => readFileSync(path, 'utf8'));
+  const context = await retrieveEmbeddedContext(files, changedFiles, diff, (path) => readFileSync(path, 'utf8'),
+    { apiKey, baseUrl: embeddingBaseUrl, model: embeddingModel });
   const review = await completeReview(reviewPrompt(changedFiles, diff, context), apiKey, baseUrl, model);
   const url = await publishReview(repository, Number(pullNumber), headSha, token, review);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `AI-ревью: ${url}\n`);
