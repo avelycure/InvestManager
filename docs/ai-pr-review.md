@@ -21,4 +21,4 @@ Workflow исполняет скрипт из базовой ветки. Ком�
 
 ## Демонстрация для задания
 
-На видео достаточно показать PR с небольшой намеренной ошибкой, страницу запуска **AI PR review**, затем комментарий с замечанием и ссылкой на строку. В кадре не показывайте страницу секретов или значения ключей. Код пайплайна находится в `.github/workflows/ai-review.yml` и `scripts/ai-review.mjs`.
+[Короткое видео с результатом](media/ai-pr-review-demo.mp4) показывает схему пайплайна и настоящие замечания бота в тестовых PR [Invest Manager #2](https://github.com/avelycure/InvestManager/pull/2#issuecomment-6253205169) и [AskMyMind #2](https://github.com/avelycure/AskMyMind/pull/2#issuecomment-6253205309). Оба тестовых PR закрыты без слияния. Код пайплайна находится в `.github/workflows/ai-review.yml` и `scripts/ai-review.mjs`.
