@@ -26,13 +26,13 @@ void test('older world stories fill only topics absent from the 24-hour report',
     [['Нефть', 'Нефть дорожает', 'Нефть дешевеет']]);
 });
 
-void test('older world stories allow five items for every uncovered topic', () => {
-  const historical = config.topics.flatMap((topic) => Array.from({ length: 6 }, (_, index) =>
+void test('older world stories allow ten items for every uncovered topic', () => {
+  const historical = config.topics.flatMap((topic) => Array.from({ length: 11 }, (_, index) =>
     story(`${topic.keywords[0]} сообщение ${index}`, '2026-10-15T08:00:00Z',
       `https://example.com/${topic.name}/${index}`)));
   const groups = worldBackfill(config, [], historical, start);
   assert.deepEqual(groups.map((group) => [group.topic, group.items.length]),
-    [['Инфляция', 5], ['Нефть', 5]]);
+    [['Инфляция', 10], ['Нефть', 10]]);
 });
 
 void test('older topic stories also prefer other editions before exceeding three from one', () => {
@@ -42,7 +42,7 @@ void test('older topic stories also prefer other editions before exceeding three
   ];
   const groups = worldBackfill(config, [], historical, start);
   assert.deepEqual(groups.find((group) => group.topic === 'Нефть')?.items.map((item) => item.source),
-    ['ТАСС', 'ТАСС', 'ТАСС', 'РБК', 'ТАСС']);
+    ['ТАСС', 'ТАСС', 'ТАСС', 'РБК', 'ТАСС', 'ТАСС', 'ТАСС']);
 });
 
 void test('topic fallback excludes publications older than six months', () => {

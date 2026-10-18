@@ -5,7 +5,7 @@ import type { ConfigFiles, NewsItem, SelectedNews } from './types';
 /** Recent dated stories for topics with no selected story in the 24-hour report. */
 export function worldBackfill(
   config: ConfigFiles, current: SelectedNews[], historical: NewsItem[], windowStart: Date,
-  perTopic = 5, totalLimit = config.topics.length * perTopic,
+  perTopic = 10, totalLimit = config.topics.length * perTopic,
   semanticTopics?: ReadonlyMap<string, string>, verifiedTopics = false,
 ): Array<{ topic: string; items: SelectedNews[] }> {
   const covered = new Set(current.map((item) => item.topic));

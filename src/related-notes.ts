@@ -7,6 +7,8 @@ interface Candidate {
   score: number;
 }
 
+export const MAX_EVENT_NOTE_LINKS = 5;
+
 function normalized(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('ru-RU').replaceAll('ё', 'е')
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
@@ -114,7 +116,7 @@ export async function findRelatedNotes(app: App, config: ConfigFiles, sourcePath
         }
         events[key] = [...found.values()].sort((a, b) => b.score - a.score
           || b.file.stat.mtime - a.file.stat.mtime || a.file.path.localeCompare(b.file.path))
-          .slice(0, 2).map(({ file }) => link(file));
+          .slice(0, MAX_EVENT_NOTE_LINKS).map(({ file }) => link(file));
       } catch {
         events[key] = [];
       }

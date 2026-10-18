@@ -83,16 +83,16 @@ void test('attributes a dated official press center story to its configured comp
   assert.equal(selected.companies[0]?.reason, 'Опубликовано на сайте компании Газпром');
 });
 
-void test('world news keeps five stories for every topic instead of one global limit', () => {
+void test('world news keeps ten stories for every topic instead of one global limit', () => {
   const topics = { ...config, topics: [
     { name: 'США', keywords: [] }, { name: 'Израиль', keywords: [] },
   ] };
-  const stories = topics.topics.flatMap((topic) => Array.from({ length: 7 }, (_, index) => ({
+  const stories = topics.topics.flatMap((topic) => Array.from({ length: 12 }, (_, index) => ({
     ...item(`${topic.name} — событие ${index}`, `https://example.com/${topic.name}/${index}`, 'Издание'),
     category: 'world' as const, topic: topic.name, reason: '',
   } satisfies SelectedNews)));
-  assert.deepEqual(worldNewsPerTopic(stories, topics, 5).map((news) => news.topic),
-    [...Array<string>(5).fill('США'), ...Array<string>(5).fill('Израиль')]);
+  assert.deepEqual(worldNewsPerTopic(stories, topics, 10).map((news) => news.topic),
+    [...Array<string>(10).fill('США'), ...Array<string>(10).fill('Израиль')]);
 });
 
 void test('topic selection reserves two places for other editions when one dominates the ranking', () => {

@@ -10,7 +10,7 @@ function item(title: string, day: number, id: number, official = false): NewsIte
     publishedAt: new Date(`2026-10-${String(day).padStart(2, '0')}T06:00:00Z`), ...(official ? { companySource: 'Фосагро' } : {}) };
 }
 
-void test('combines five official releases and three other stories for one company', () => {
+void test('combines five official releases and five other stories for one company', () => {
   const current: SelectedNews[] = [{ ...item('Фосагро объявила результаты', 17, 1, true), category: 'company', company: 'Фосагро', reason: '' },
     { ...item('Фосагро меняет руководство', 17, 2), category: 'company', company: 'Фосагро', reason: '' }];
   const historical = [
@@ -24,7 +24,7 @@ void test('combines five official releases and three other stories for one compa
   const [group] = companyCoverage(config, current, historical, start);
   assert.equal(group?.company, 'Фосагро');
   assert.deepEqual(group?.press.map((news) => news.publishedAt.getUTCDate()), [17, 14, 13, 12, 11]);
-  assert.deepEqual(group?.news.map((news) => news.publishedAt.getUTCDate()), [17, 13, 12]);
+  assert.deepEqual(group?.news.map((news) => news.publishedAt.getUTCDate()), [17, 13, 12, 11, 10]);
 });
 
 void test('ignores archive month navigation', () => {

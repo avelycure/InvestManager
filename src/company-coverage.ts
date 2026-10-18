@@ -26,10 +26,10 @@ function latest(items: SelectedNews[], limit: number): SelectedNews[] {
   }).sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime()).slice(0, limit);
 }
 
-/** A company always gets one combined block: up to 5 official and 3 other stories. */
+/** A company always gets one combined block: up to 5 official and 5 other stories. */
 export function companyCoverage(
   config: ConfigFiles, current: SelectedNews[], historical: NewsItem[],
-  windowStart: Date, pressLimit = 5, newsLimit = 3,
+  windowStart: Date, pressLimit = 5, newsLimit = 5,
 ): CompanyNewsGroup[] {
   const oldestAllowed = sixMonthsBefore(new Date(windowStart.getTime() + 24 * 60 * 60_000));
   const eligible = historical.filter((item) => isArticle(item) && item.publishedAt >= oldestAllowed && item.publishedAt < windowStart);
