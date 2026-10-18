@@ -3,8 +3,9 @@ import { access } from 'node:fs/promises';
 import { delimiter, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { publicSourceUrl } from './public-source-url';
+import { ElectronStdioClientTransport } from './electron-stdio-transport';
 
 const MCP_PACKAGE = '@playwright/mcp@0.0.83';
 const MAX_RENDERED_HTML = 4_000_000;
@@ -47,7 +48,7 @@ export async function readRenderedCompanyPage(url: string): Promise<string> {
   const client = new Client({ name: 'invest-manager', version: '0.1.0' });
   const environment = getDefaultEnvironment();
   environment.PATH = `${dirname(command)}${delimiter}${environment.PATH ?? ''}`;
-  const transport = new StdioClientTransport({
+  const transport = new ElectronStdioClientTransport({
     command,
     args: ['-y', MCP_PACKAGE, '--headless', '--isolated', '--no-webmcp', '--block-service-workers',
       '--snapshot-mode', 'none', '--image-responses', 'omit', '--timeout-navigation', '15000'],
